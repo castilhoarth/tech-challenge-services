@@ -37,6 +37,10 @@ aws dynamodb create-table \
 ```
 (Nota: O throughput provisionado acima é o mínimo possível, ideal para o free tier/testes).
 
+No Docker Compose local, o serviço `dynamodb-init` cria esta tabela
+automaticamente antes de iniciar o worker do analytics. Em uma instalação AWS,
+a tabela continua sendo um recurso que deve ser provisionado separadamente.
+
 ## 🚀 Rodando Localmente
 **1. Clone o repositório** e entre na pasta `analytics-service`.
 

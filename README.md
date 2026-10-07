@@ -486,3 +486,24 @@ flowchart LR
     class AppRepo,CI inScope;
     class ECR,GitOps,Argo,Cluster,IaC external;
 ```
+
+## Observabilidade dos serviços Python
+
+Os serviços `analytics-service`, `flag-service` e `targeting-service` iniciam
+com auto-instrumentação OpenTelemetry e exportam traces, métricas e logs para
+New Relic via OTLP/HTTP protobuf. Para executar o stack localmente, defina
+`NEW_RELIC_LICENSE_KEY` no ambiente; o valor não deve ser salvo no repositório
+nem na imagem Docker:
+
+```sh
+export NEW_RELIC_LICENSE_KEY="<license-key>"
+export DEPLOYMENT_ENVIRONMENT="development"
+docker compose --env-file services/.env -f services/docker-compose.yml up --build
+```
+
+Por padrão, os serviços usam `https://otlp.nr-data.net:4318`. Para uma conta
+em outra região New Relic, configure `NEW_RELIC_OTLP_ENDPOINT` antes de iniciar
+o Compose. O serviço `OTEL_SERVICE_NAME` é definido de forma distinta para
+cada container. Consulte
+[`specs/001-python-observability/quickstart.md`](./specs/001-python-observability/quickstart.md)
+para os passos de validação.

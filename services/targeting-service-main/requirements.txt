@@ -1,6 +1,12 @@
 Flask==3.0.0
 werkzeug==3.0.1
-psycopg2-binary==2.9.5
+psycopg2-binary==2.9.11
 gunicorn==20.1.0
 python-dotenv==0.21.0
 requests==2.28.1
+opentelemetry-distro
+opentelemetry-exporter-otlp
+opentelemetry-instrumentation-flask
+opentelemetry-instrumentation-logging
+opentelemetry-instrumentation-requests
+opentelemetry-instrumentation-psycopg2

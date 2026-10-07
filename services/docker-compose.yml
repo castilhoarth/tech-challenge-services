@@ -1,0 +1,185 @@
+x-newrelic-otel-environment: &newrelic-otel-environment
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${NEW_RELIC_OTLP_ENDPOINT:-https://otlp.nr-data.net:4318}
+  OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+  OTEL_EXPORTER_OTLP_HEADERS: "api-key=${NEW_RELIC_LICENSE_KEY:?Set NEW_RELIC_LICENSE_KEY in the environment}"
+  OTEL_TRACES_EXPORTER: otlp
+  OTEL_METRICS_EXPORTER: otlp
+  OTEL_LOGS_EXPORTER: otlp
+  OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED: "true"
+  OTEL_RESOURCE_ATTRIBUTES: deployment.environment=${DEPLOYMENT_ENVIRONMENT:-development}
+
+services:
+
+  postgres-auth:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${AUTH_DB_NAME}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${AUTH_DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - auth_data:/var/lib/postgresql/data
+      - ./auth-service-main/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  auth-service:
+    build: ./auth-service-main
+    ports:
+      - "${AUTH_PORT}:${AUTH_PORT}"
+    environment:
+      DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@postgres-auth:5432/${AUTH_DB_NAME}?sslmode=disable
+      PORT: ${AUTH_PORT}
+      MASTER_KEY: ${MASTER_KEY}
+    depends_on:
+      postgres-auth:
+        condition: service_healthy
+
+  postgres-flags:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${FLAGS_DB_NAME}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${FLAGS_DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - flags_data:/var/lib/postgresql/data
+      - ./flag-service-main/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+      
+  flag-service:
+    build: ./flag-service-main
+    ports:
+      - "${FLAG_PORT}:${FLAG_PORT}"
+    environment:
+      <<: *newrelic-otel-environment
+      OTEL_SERVICE_NAME: flag-service
+      DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@postgres-flags:5432/${FLAGS_DB_NAME}?sslmode=disable
+      AUTH_SERVICE_URL: http://auth-service:8001
+      PORT: ${FLAG_PORT}
+    depends_on:
+      auth-service:
+        condition: service_started
+      postgres-flags:
+        condition: service_healthy
+
+  postgres-targeting:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${TARGETING_DB_NAME}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${TARGETING_DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - targeting_data:/var/lib/postgresql/data
+      - ./targeting-service-main/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  targeting-service:
+    build: ./targeting-service-main
+    ports:
+      - "${TARGETING_PORT}:${TARGETING_PORT}"
+    environment:
+      <<: *newrelic-otel-environment
+      OTEL_SERVICE_NAME: targeting-service
+      DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@postgres-targeting:5432/${TARGETING_DB_NAME}?sslmode=disable
+      AUTH_SERVICE_URL: http://auth-service:${AUTH_PORT}
+      PORT: ${TARGETING_PORT}
+    depends_on:
+      auth-service:
+        condition: service_started
+      postgres-targeting:
+        condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  evaluation-service:
+    build: ./evaluation-service-main
+    ports:
+      - "${EVALUATION_PORT}:${EVALUATION_PORT}"
+    environment:
+      PORT: ${EVALUATION_PORT}
+      REDIS_URL: redis://redis:6379
+      FLAG_SERVICE_URL: http://flag-service:${FLAG_PORT}
+      TARGETING_SERVICE_URL: http://targeting-service:${TARGETING_PORT}
+      SERVICE_API_KEY: ${SERVICE_API_KEY}
+      AWS_ACCESS_KEY_ID: ${aws_access_key_id}
+      AWS_SECRET_ACCESS_KEY: ${aws_secret_access_key}
+      AWS_SESSION_TOKEN: ${aws_session_token}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_SQS_URL: ${AWS_SQS_URL}
+    depends_on:
+      redis:
+        condition: service_healthy
+      flag-service:
+        condition: service_started
+      targeting-service:
+        condition: service_started
+
+  dynamodb:
+    image: amazon/dynamodb-local:latest
+    container_name: dynamodb-local
+    command: "-jar DynamoDBLocal.jar -sharedDb -dbPath /data"
+    ports:
+      - "8000:8000"
+    volumes:
+      - dynamodb_data:/data
+    user: "root"
+
+  dynamodb-init:
+    build: ./analytics-service-main
+    command: ["python", "init_dynamodb.py"]
+    environment:
+      AWS_DYNAMODB_ENDPOINT: http://dynamodb:8000
+      AWS_DYNAMODB_TABLE: ToggleMasterAnalytics
+      AWS_ACCESS_KEY_ID: dummy
+      AWS_SECRET_ACCESS_KEY: dummy
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+    depends_on:
+      dynamodb:
+        condition: service_started
+    restart: "no"
+
+  analytics-service:
+    build: ./analytics-service-main
+    ports:
+      - "8005:8005"
+    environment:
+      <<: *newrelic-otel-environment
+      OTEL_SERVICE_NAME: analytics-service
+      AWS_DYNAMODB_TABLE: ToggleMasterAnalytics
+      AWS_DYNAMODB_ENDPOINT: http://dynamodb:8000
+      AWS_ACCESS_KEY_ID: ${aws_access_key_id}
+      AWS_SECRET_ACCESS_KEY: ${aws_secret_access_key}
+      AWS_SESSION_TOKEN: ${aws_session_token}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_SQS_URL: ${AWS_SQS_URL}
+    depends_on:
+      dynamodb-init:
+        condition: service_completed_successfully
+      flag-service:
+        condition: service_started
+      targeting-service:
+        condition: service_started
+
+volumes:
+  auth_data:
+  flags_data:
+  targeting_data:
+  dynamodb_data:

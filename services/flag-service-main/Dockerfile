@@ -20,6 +20,13 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 # ==========================
 FROM python:3.11-slim
 
+ENV OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp.nr-data.net:4318 \
+    OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
+    OTEL_TRACES_EXPORTER=otlp \
+    OTEL_METRICS_EXPORTER=otlp \
+    OTEL_LOGS_EXPORTER=otlp \
+    OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED=true
+
 WORKDIR /app
 
 # Copia as dependências já instaladas
@@ -31,4 +38,4 @@ COPY db ./db
 
 EXPOSE 8002
 
-CMD ["gunicorn", "--bind", "0.0.0.0:8002", "app:app"]
+CMD ["opentelemetry-instrument", "gunicorn", "--bind", "0.0.0.0:8002", "app:app"]

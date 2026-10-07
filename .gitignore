@@ -17,3 +17,6 @@ response.json
 *.pyc
 .venv/
 .pytest_cache/
+.env
+.env.*
+!.env.example
