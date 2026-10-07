@@ -1,14 +1,25 @@
-x-newrelic-otel-environment: &newrelic-otel-environment
-  OTEL_EXPORTER_OTLP_ENDPOINT: ${NEW_RELIC_OTLP_ENDPOINT:-https://otlp.nr-data.net:4318}
+x-otel-app-environment: &otel-app-environment
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
   OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
-  OTEL_EXPORTER_OTLP_HEADERS: "api-key=${NEW_RELIC_LICENSE_KEY:?Set NEW_RELIC_LICENSE_KEY in the environment}"
   OTEL_TRACES_EXPORTER: otlp
   OTEL_METRICS_EXPORTER: otlp
   OTEL_LOGS_EXPORTER: otlp
-  OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED: "true"
   OTEL_RESOURCE_ATTRIBUTES: deployment.environment=${DEPLOYMENT_ENVIRONMENT:-development}
+  DEPLOYMENT_ENVIRONMENT: ${DEPLOYMENT_ENVIRONMENT:-development}
 
 services:
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.162.0
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:13133:13133"
+    volumes:
+      - ./otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    environment:
+      NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY:?Set NEW_RELIC_LICENSE_KEY in the environment}
+      NEW_RELIC_OTLP_ENDPOINT: ${NEW_RELIC_OTLP_ENDPOINT:-https://otlp.nr-data.net}
 
   postgres-auth:
     image: postgres:16
@@ -30,10 +41,14 @@ services:
     ports:
       - "${AUTH_PORT}:${AUTH_PORT}"
     environment:
+      <<: *otel-app-environment
+      OTEL_SERVICE_NAME: auth-service
       DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@postgres-auth:5432/${AUTH_DB_NAME}?sslmode=disable
       PORT: ${AUTH_PORT}
       MASTER_KEY: ${MASTER_KEY}
     depends_on:
+      otel-collector:
+        condition: service_started
       postgres-auth:
         condition: service_healthy
 
@@ -57,12 +72,15 @@ services:
     ports:
       - "${FLAG_PORT}:${FLAG_PORT}"
     environment:
-      <<: *newrelic-otel-environment
+      <<: *otel-app-environment
       OTEL_SERVICE_NAME: flag-service
+      OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED: "true"
       DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@postgres-flags:5432/${FLAGS_DB_NAME}?sslmode=disable
       AUTH_SERVICE_URL: http://auth-service:8001
       PORT: ${FLAG_PORT}
     depends_on:
+      otel-collector:
+        condition: service_started
       auth-service:
         condition: service_started
       postgres-flags:
@@ -88,12 +106,15 @@ services:
     ports:
       - "${TARGETING_PORT}:${TARGETING_PORT}"
     environment:
-      <<: *newrelic-otel-environment
+      <<: *otel-app-environment
       OTEL_SERVICE_NAME: targeting-service
+      OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED: "true"
       DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@postgres-targeting:5432/${TARGETING_DB_NAME}?sslmode=disable
       AUTH_SERVICE_URL: http://auth-service:${AUTH_PORT}
       PORT: ${TARGETING_PORT}
     depends_on:
+      otel-collector:
+        condition: service_started
       auth-service:
         condition: service_started
       postgres-targeting:
@@ -114,6 +135,8 @@ services:
     ports:
       - "${EVALUATION_PORT}:${EVALUATION_PORT}"
     environment:
+      <<: *otel-app-environment
+      OTEL_SERVICE_NAME: evaluation-service
       PORT: ${EVALUATION_PORT}
       REDIS_URL: redis://redis:6379
       FLAG_SERVICE_URL: http://flag-service:${FLAG_PORT}
@@ -125,6 +148,8 @@ services:
       AWS_REGION: ${AWS_REGION:-us-east-1}
       AWS_SQS_URL: ${AWS_SQS_URL}
     depends_on:
+      otel-collector:
+        condition: service_started
       redis:
         condition: service_healthy
       flag-service:
@@ -161,8 +186,9 @@ services:
     ports:
       - "8005:8005"
     environment:
-      <<: *newrelic-otel-environment
+      <<: *otel-app-environment
       OTEL_SERVICE_NAME: analytics-service
+      OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED: "true"
       AWS_DYNAMODB_TABLE: ToggleMasterAnalytics
       AWS_DYNAMODB_ENDPOINT: http://dynamodb:8000
       AWS_ACCESS_KEY_ID: ${aws_access_key_id}
@@ -171,6 +197,8 @@ services:
       AWS_REGION: ${AWS_REGION:-us-east-1}
       AWS_SQS_URL: ${AWS_SQS_URL}
     depends_on:
+      otel-collector:
+        condition: service_started
       dynamodb-init:
         condition: service_completed_successfully
       flag-service:

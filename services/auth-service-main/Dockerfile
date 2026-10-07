@@ -19,6 +19,12 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o auth-service .
 # ==========================
 FROM alpine:3.20
 
+ENV OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 \
+    OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
+    OTEL_TRACES_EXPORTER=otlp \
+    OTEL_METRICS_EXPORTER=otlp \
+    OTEL_LOGS_EXPORTER=otlp
+
 WORKDIR /app
 
 RUN apk --no-cache add ca-certificates
