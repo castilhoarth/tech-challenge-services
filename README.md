@@ -564,6 +564,8 @@ serviço de avaliação propaga W3C Trace Context para chamadas ao flag-service
 e targeting-service. A conexão PostgreSQL de auth usa instrumentação
 `database/sql`, e o cliente Redis do evaluation usa o hook compatível com
 go-redis v8. Os logs Go continuam no stderr e também são enviados ao Collector.
+Para eventos de avaliação, o produtor cria um span de envio SQS e propaga
+`traceparent`/`tracestate` em atributos da mensagem.
 
 ### Propagação e limites
 
@@ -571,9 +573,12 @@ O ambiente `DEPLOYMENT_ENVIRONMENT` identifica o ambiente em todas as
 aplicações. Com tráfego real, traces síncronos podem relacionar
 evaluation-service com flag-service e targeting-service, e essas chamadas com
 auth-service. Redis e PostgreSQL aparecem como dependências somente quando as
-operações instrumentadas geram spans. A correlação de traces entre o produtor
-SQS Go e o consumidor SQS Python não está configurada; portanto, não se deve
-esperar que analytics-service esteja conectado ao mesmo trace de avaliação.
+operações instrumentadas geram spans. A mensagem SQS carrega o contexto W3C
+em atributos, que o analytics-service extrai para criar um span consumidor e
+relacionar o processamento ao trace de avaliação. Essa correlação depende de
+a mensagem ser consumida com sucesso e ainda precisa ser confirmada em um trace
+real do New Relic; credenciais SQS inválidas ou expiradas impedem essa
+verificação.
 
 Para iniciar, gerar tráfego e verificar traces recebidos no New Relic, consulte
 [`docs/runbooks/observability.md`](./docs/runbooks/observability.md).

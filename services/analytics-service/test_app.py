@@ -2,6 +2,7 @@ import pytest
 import json
 import uuid
 from unittest.mock import MagicMock, patch, call
+from opentelemetry import trace
 from botocore.exceptions import ClientError
 import sys
 import os
@@ -96,6 +97,50 @@ class TestProcessMessage:
         call_args = mock_dynamodb_client.put_item.call_args
         assert call_args[1]['TableName'] is not None
         assert 'Item' in call_args[1]
+
+    def test_process_message_uses_sqs_trace_context(
+        self, sample_message, mock_dynamodb_client, mock_sqs_client
+    ):
+        sample_message['MessageAttributes'] = {
+            'traceparent': {
+                'DataType': 'String',
+                'StringValue': '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01',
+            },
+            'tracestate': {
+                'DataType': 'String',
+                'StringValue': 'vendor=value',
+            },
+        }
+        mock_span = MagicMock()
+
+        with patch('app.tracer.start_as_current_span') as start_span:
+            start_span.return_value.__enter__.return_value = mock_span
+            process_message(sample_message)
+
+        parent_context = start_span.call_args.kwargs['context']
+        parent_span_context = trace.get_current_span(parent_context).get_span_context()
+        assert parent_span_context.trace_id == int('0af7651916cd43dd8448eb211c80319c', 16)
+        assert parent_span_context.span_id == int('b7ad6b7169203331', 16)
+        assert parent_span_context.is_remote
+        assert start_span.call_args.kwargs['kind'] == trace.SpanKind.CONSUMER
+        mock_span.set_status.assert_not_called()
+        mock_dynamodb_client.put_item.assert_called_once()
+
+    def test_process_message_marks_failed_processing_span(
+        self, sample_message, mock_dynamodb_client, mock_sqs_client
+    ):
+        from opentelemetry.trace import StatusCode
+
+        mock_dynamodb_client.put_item.side_effect = RuntimeError('write failed')
+        mock_span = MagicMock()
+
+        with patch('app.tracer.start_as_current_span') as start_span:
+            start_span.return_value.__enter__.return_value = mock_span
+            process_message(sample_message)
+
+        mock_span.set_status.assert_called_once()
+        assert mock_span.set_status.call_args.args[0].status_code == StatusCode.ERROR
+        mock_sqs_client.delete_message.assert_not_called()
 
     def test_process_message_invalid_json_body(self, sample_message, mock_dynamodb_client, mock_sqs_client):
         """Handle invalid JSON in message body gracefully"""
@@ -194,6 +239,10 @@ class TestSQSWorkerLoop:
             sqs_worker_loop()
         
         mock_dynamodb_client.put_item.assert_called_once()
+        assert mock_sqs_client.receive_message.call_args.kwargs['MessageAttributeNames'] == [
+            'traceparent',
+            'tracestate',
+        ]
 
     def test_worker_handles_empty_response(self, mock_sqs_client):
         """Worker should handle empty message responses"""

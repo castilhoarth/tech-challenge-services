@@ -1,21 +1,23 @@
-# OpenTelemetry and New Relic Runbook
+# Runbook do OpenTelemetry e New Relic
 
-This runbook starts the local microservices stack with the pinned OpenTelemetry
-Collector and sends supported telemetry to New Relic. It assumes commands are
-run from the repository root.
+Este runbook inicia localmente o conjunto de microsserviços com a versão
+fixada do OpenTelemetry Collector e envia para o New Relic os sinais de
+telemetria suportados. Os comandos devem ser executados a partir da raiz do
+repositório.
 
-## Prerequisites
+## Pré-requisitos
 
-- Docker Engine or Docker Desktop with Docker Compose.
-- A New Relic account and license key.
-- Application configuration in `services/.env`. Do not add the New Relic key
-  to that file.
-- A flag already present in the application data for the evaluation request.
+- Docker Engine ou Docker Desktop com Docker Compose.
+- Uma conta New Relic e uma chave de licença.
+- Configurações das aplicações em `services/.env`. Não adicione a chave do
+  New Relic a esse arquivo.
+- Uma flag existente nos dados da aplicação para usar na requisição de
+  avaliação.
 
-## Set the runtime New Relic settings
+## Configure as variáveis de runtime do New Relic
 
-Read the key without echoing it, then export it only into the current terminal
-session. The Collector is the only service configured to receive this key.
+Leia a chave sem exibi-la e exporte-a somente na sessão atual do terminal.
+Somente o Collector está configurado para receber essa chave.
 
 ```sh
 printf 'New Relic license key: '
@@ -26,14 +28,15 @@ export NEW_RELIC_OTLP_ENDPOINT='https://otlp.nr-data.net'
 export DEPLOYMENT_ENVIRONMENT='development'
 ```
 
-The endpoint above is the US endpoint. For an EU account, use
-`https://otlp.eu01.nr-data.net`. Do not paste the key into shell commands,
-Compose files, application configuration, or Docker build arguments.
+O endpoint acima é o dos EUA. Para uma conta na União Europeia, use
+`https://otlp.eu01.nr-data.net`. Não cole a chave em comandos do shell,
+arquivos do Compose, configurações das aplicações ou argumentos de build do
+Docker.
 
-## Validate configuration (optional)
+## Valide a configuração (opcional)
 
-Validate the Collector configuration using a dummy key. This does not send
-telemetry to New Relic.
+Valide a configuração do Collector usando uma chave fictícia. Isso não envia
+telemetria ao New Relic.
 
 ```sh
 docker run --rm \
@@ -45,7 +48,8 @@ docker run --rm \
   validate --config=/etc/otelcol-contrib/config.yaml
 ```
 
-Check merged Compose syntax without displaying the resolved configuration:
+Verifique a sintaxe da configuração combinada do Compose sem exibir os valores
+resolvidos:
 
 ```sh
 NEW_RELIC_LICENSE_KEY=validation-only \
@@ -54,22 +58,22 @@ DEPLOYMENT_ENVIRONMENT=validation \
 docker compose --env-file services/.env -f deploy/local/docker-compose.yml config --quiet
 ```
 
-## Start the stack
+## Inicie o conjunto de serviços
 
-Build and start all services:
+Compile e inicie todos os serviços:
 
 ```sh
 docker compose --env-file services/.env -f deploy/local/docker-compose.yml up --build -d
 ```
 
-Check container status and Collector health:
+Verifique o estado dos containers e a saúde do Collector:
 
 ```sh
 docker compose --env-file services/.env -f deploy/local/docker-compose.yml ps
 curl -fsS http://localhost:13133/
 ```
 
-Check the HTTP service health endpoints:
+Verifique os endpoints HTTP de saúde dos serviços:
 
 ```sh
 curl -fsS http://localhost:8001/health
@@ -79,29 +83,32 @@ curl -fsS http://localhost:8004/health
 curl -fsS http://localhost:8005/health
 ```
 
-## Generate representative traffic
+## Gere tráfego representativo
 
-Replace `existing-flag` with a flag that exists in the configured application
-data:
+Substitua `existing-flag` por uma flag que exista nos dados configurados da
+aplicação:
 
 ```sh
 curl -i 'http://localhost:8004/evaluate?user_id=otel-smoke&flag_name=existing-flag'
 ```
 
-Repeat the request to generate additional traffic. On an evaluation cache
-miss, `evaluation-service` calls `flag-service` and `targeting-service`;
-those services validate API keys through `auth-service`. If SQS is configured
-and usable, evaluation events may also be processed by `analytics-service`.
+Repita a requisição para gerar mais tráfego. Em caso de cache miss no serviço
+de avaliação, `evaluation-service` chama `flag-service` e `targeting-service`;
+esses serviços validam as chaves de API por meio de `auth-service`. Se o SQS
+estiver configurado e disponível, os eventos de avaliação também poderão ser
+processados por `analytics-service`. O produtor Go inclui `traceparent` e
+`tracestate` do W3C nos atributos da mensagem SQS; o worker Python extrai esses
+valores e inicia um span consumidor no trace de origem.
 
-To generate multiple requests with unique trace IDs, run:
+Para gerar várias requisições com IDs de trace exclusivos, execute:
 
 ```sh
 scripts/observability/generate-otel-traffic.sh
 ```
 
-By default it sends 10 requests for `enable-new-dashboard`, waiting one second
-between requests. Ensure that flag exists in your local data. Override the
-behavior with environment variables:
+Por padrão, o script envia 10 requisições para `enable-new-dashboard`, com um
+segundo de intervalo. Confirme que essa flag existe nos dados locais. Você
+pode alterar o comportamento com estas variáveis de ambiente:
 
 ```sh
 FLAG_NAME='your-existing-flag' \
@@ -110,11 +117,11 @@ REQUEST_INTERVAL_SECONDS=0.5 \
 scripts/observability/generate-otel-traffic.sh
 ```
 
-The script prints each W3C trace ID so you can search for the exact request in
-New Relic. It does not require a New Relic query API key and does not confirm
-ingestion by itself.
+O script imprime o ID W3C de cada trace para que você possa localizar a
+requisição no New Relic. Ele não exige uma chave de API de consulta do New
+Relic e, por si só, não confirma a ingestão da telemetria.
 
-In New Relic's query interface, search for one of the printed IDs:
+Na interface de consulta do New Relic, pesquise um dos IDs impressos:
 
 ```sql
 SELECT count(*) FROM Span
@@ -122,7 +129,7 @@ WHERE trace.id = 'paste-printed-trace-id-here'
 SINCE 30 minutes ago
 ```
 
-To see the services observed in that trace:
+Para ver quais serviços foram observados nesse trace:
 
 ```sql
 SELECT uniques(service.name) FROM Span
@@ -130,23 +137,25 @@ WHERE trace.id = 'paste-printed-trace-id-here'
 SINCE 30 minutes ago
 ```
 
-If the trace appears, New Relic received it. Evaluation caches flag data by
-flag name, so later requests may not include flag/targeting/auth spans; wait
-for the cache TTL or use another existing flag to exercise those edges.
+Se o trace aparecer, o New Relic o recebeu. O serviço de avaliação mantém em
+cache os dados da flag; por isso, requisições posteriores talvez não incluam
+spans de flag/targeting/auth. Aguarde o TTL do cache ou use outra flag
+existente para exercitar essas relações.
 
-## Inspect runtime status
+## Inspecione o estado de runtime
 
-Use Compose status and Collector logs to diagnose startup or export issues.
-Avoid printing environment variables or resolved Compose configuration.
+Use o estado do Compose e os logs do Collector para investigar problemas de
+inicialização ou exportação. Evite exibir variáveis de ambiente ou a
+configuração resolvida do Compose.
 
 ```sh
 docker compose --env-file services/.env -f deploy/local/docker-compose.yml ps
 docker compose --env-file services/.env -f deploy/local/docker-compose.yml logs --tail=100 otel-collector
 ```
 
-## Verify telemetry in New Relic
+## Verifique a telemetria no New Relic
 
-Check for these distinct service identities:
+Confirme se aparecem estas identidades distintas de serviço:
 
 - `auth-service`
 - `flag-service`
@@ -154,30 +163,34 @@ Check for these distinct service identities:
 - `evaluation-service`
 - `analytics-service`
 
-Inspect traces, metrics, and logs separately, and confirm the
-`deployment.environment` attribute. With representative evaluation traffic,
-look for the observed synchronous edges: evaluation to flag and targeting,
-then flag and targeting to auth. Database and Redis spans should be checked
-only if they appear in the received telemetry.
+Inspecione traces, métricas e logs separadamente e confirme o atributo
+`deployment.environment`. Com tráfego representativo de avaliação, procure as
+relações síncronas observadas: evaluation com flag e targeting, e depois flag
+e targeting com auth. Os spans de banco de dados e Redis só devem ser
+considerados presentes se aparecerem na telemetria recebida.
 
-Collector readiness and valid configuration do not establish that New Relic
-received telemetry. This setup does not inject or extract trace context across
-SQS messages, so an evaluation-to-analytics trace relationship is not
-configured or verified. Record any signal or service edge as verified only
-after observing it in New Relic.
+Collector pronto e configuração válida não comprovam que o New Relic recebeu
+telemetria. A propagação de contexto pelo SQS está configurada e coberta por
+testes unitários focados, mas a relação entre evaluation e analytics ainda não
+foi verificada de ponta a ponta. Para confirmá-la, o produtor precisa enviar a
+mensagem, o worker precisa consumi-la e os spans relacionados precisam
+aparecer no New Relic. Confirme que as credenciais AWS são válidas e que
+`AWS_SQS_URL` aponta para uma fila funcional; credenciais expiradas impedem
+essa verificação. Considere qualquer sinal ou relação validado somente depois
+de observá-lo no New Relic.
 
-## Stop the stack
+## Pare o conjunto de serviços
 
-Stop services without deleting persistent data:
+Pare os serviços sem excluir os dados persistentes:
 
 ```sh
 docker compose --env-file services/.env -f deploy/local/docker-compose.yml down
 ```
 
-Do not use `docker compose down -v`; the existing database and DynamoDB data
-volumes must be preserved.
+Não use `docker compose down -v`: isso removeria os volumes persistentes dos
+bancos de dados e do DynamoDB.
 
-When finished, remove the key from the current shell:
+Ao terminar, remova a chave do shell atual:
 
 ```sh
 unset NEW_RELIC_LICENSE_KEY
