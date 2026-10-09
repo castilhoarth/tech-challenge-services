@@ -8,30 +8,45 @@ repositório.
 ## Pré-requisitos
 
 - Docker Engine ou Docker Desktop com Docker Compose.
-- Uma conta New Relic e uma chave de licença.
+- `curl`, `jq` e `openssl` disponíveis no terminal.
+- Uma conta New Relic, uma chave de ingestão (license key), o ID numérico da
+  conta e uma chave de usuário/API com permissão para consultar NerdGraph.
 - Configurações das aplicações em `services/.env`. Não adicione a chave do
   New Relic a esse arquivo.
 - Uma flag existente nos dados da aplicação para usar na requisição de
   avaliação.
+- Credenciais AWS válidas e `AWS_SQS_URL` apontando para uma fila acessível
+  para verificar também a relação assíncrona com `analytics-service`.
 
-## Configure as variáveis de runtime do New Relic
+## 1. Confira a configuração local
 
-Leia a chave sem exibi-la e exporte-a somente na sessão atual do terminal.
-Somente o Collector está configurado para receber essa chave.
+Antes de iniciar, confirme no seu editor que `services/.env` contém a
+configuração local necessária e que `SERVICE_API_KEY` corresponde a uma chave
+ativa criada pelo
+`auth-service`. `evaluation-service` envia essa chave a `flag-service` e
+`targeting-service`, que a validam com `auth-service`. Se o arquivo já contém
+uma chave ativa, mantenha-a e pule para a próxima seção.
+
+Se não tiver essa chave, inicie o stack e siga a etapa 4 para criá-la.
+
+## 2. Configure o runtime do New Relic
+
+No zsh, leia a chave de ingestão sem exibi-la e exporte-a somente na sessão
+atual do terminal. Somente o Collector está configurado para receber essa
+chave. O endpoint abaixo é dos EUA; para uma conta na União Europeia, use
+`https://otlp.eu01.nr-data.net`.
 
 ```sh
-printf 'New Relic license key: '
-read -r -s NEW_RELIC_LICENSE_KEY
+printf 'New Relic ingest license key: '
+read -s NEW_RELIC_LICENSE_KEY
 printf '\n'
 export NEW_RELIC_LICENSE_KEY
 export NEW_RELIC_OTLP_ENDPOINT='https://otlp.nr-data.net'
 export DEPLOYMENT_ENVIRONMENT='development'
 ```
 
-O endpoint acima é o dos EUA. Para uma conta na União Europeia, use
-`https://otlp.eu01.nr-data.net`. Não cole a chave em comandos do shell,
-arquivos do Compose, configurações das aplicações ou argumentos de build do
-Docker.
+Não adicione a chave de ingestão ao `services/.env`, ao Compose, às
+configurações das aplicações ou aos argumentos de build do Docker.
 
 ## Valide a configuração (opcional)
 
@@ -58,7 +73,7 @@ DEPLOYMENT_ENVIRONMENT=validation \
 docker compose --env-file services/.env -f deploy/local/docker-compose.yml config --quiet
 ```
 
-## Inicie o conjunto de serviços
+## 3. Inicie o conjunto de serviços
 
 Compile e inicie todos os serviços:
 
@@ -83,64 +98,67 @@ curl -fsS http://localhost:8004/health
 curl -fsS http://localhost:8005/health
 ```
 
-## Gere tráfego representativo
+## 4. Gere tráfego e verifique os traces distribuídos
 
-Substitua `existing-flag` por uma flag que exista nos dados configurados da
-aplicação:
-
-```sh
-curl -i 'http://localhost:8004/evaluate?user_id=otel-smoke&flag_name=existing-flag'
-```
-
-Repita a requisição para gerar mais tráfego. Em caso de cache miss no serviço
-de avaliação, `evaluation-service` chama `flag-service` e `targeting-service`;
-esses serviços validam as chaves de API por meio de `auth-service`. Se o SQS
-estiver configurado e disponível, os eventos de avaliação também poderão ser
-processados por `analytics-service`. O produtor Go inclui `traceparent` e
-`tracestate` do W3C nos atributos da mensagem SQS; o worker Python extrai esses
-valores e inicia um span consumidor no trace de origem.
-
-Para gerar várias requisições com IDs de trace exclusivos, execute:
+Se `SERVICE_API_KEY` ainda não corresponder a uma chave ativa do
+`auth-service`, crie uma agora. No zsh, leia a master key sem exibi-la:
 
 ```sh
-scripts/observability/generate-otel-traffic.sh
+printf 'Auth master key: '
+read -s MASTER_KEY
+printf '\n'
+
+curl -fsS -X POST http://localhost:8001/admin/keys \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${MASTER_KEY}" \
+  -d '{"name":"local-evaluation"}' | jq -r '.key'
+
+unset MASTER_KEY
 ```
 
-Por padrão, o script envia 10 requisições para `enable-new-dashboard`, com um
-segundo de intervalo. Confirme que essa flag existe nos dados locais. Você
-pode alterar o comportamento com estas variáveis de ambiente:
+Copie a chave retornada para `SERVICE_API_KEY` em `services/.env`, usando seu
+editor local. Trate-a como segredo e não a compartilhe. Recrie os três serviços
+para que leiam a nova chave:
 
 ```sh
-FLAG_NAME='your-existing-flag' \
-TRAFFIC_COUNT=25 \
-REQUEST_INTERVAL_SECONDS=0.5 \
-scripts/observability/generate-otel-traffic.sh
+docker compose --env-file services/.env -f deploy/local/docker-compose.yml \
+  up -d --force-recreate evaluation-service flag-service targeting-service
 ```
 
-O script imprime o ID W3C de cada trace para que você possa localizar a
-requisição no New Relic. Ele não exige uma chave de API de consulta do New
-Relic e, por si só, não confirma a ingestão da telemetria.
+O script envia uma requisição de avaliação com um novo ID W3C e consulta o
+NerdGraph até encontrar o trace. Informe o ID numérico da conta New Relic;
+quando solicitado, digite uma chave de usuário/API do New Relic com permissão
+de consulta, sem exibi-la. Essa chave é diferente da chave de ingestão usada
+pelo Collector.
 
-Na interface de consulta do New Relic, pesquise um dos IDs impressos:
-
-```sql
-SELECT count(*) FROM Span
-WHERE trace.id = 'paste-printed-trace-id-here'
-SINCE 30 minutes ago
+```sh
+NEW_RELIC_ACCOUNT_ID='seu-account-id' \
+FLAG_NAME='sua-flag-existente' \
+MIN_SERVICE_COUNT=5 \
+scripts/observability/test-distributed-traces.sh
 ```
 
-Para ver quais serviços foram observados nesse trace:
+Por padrão, o script testa `enable-new-dashboard`; escolha uma flag que exista
+no ambiente. `MIN_SERVICE_COUNT=5` faz o teste passar apenas quando o mesmo
+trace contiver `evaluation-service`, `flag-service`, `targeting-service`,
+`auth-service` e `analytics-service`. O script requer `curl`, `jq` e `openssl`.
+Ele pede a chave de usuário/API em um prompt oculto; alternativamente, defina
+`NEW_RELIC_USER_API_KEY` no ambiente. Não a coloque em `services/.env`.
 
-```sql
-SELECT uniques(service.name) FROM Span
-WHERE trace.id = 'paste-printed-trace-id-here'
-SINCE 30 minutes ago
-```
+A execução de 2026-10-09 foi confirmada no New Relic com os cinco serviços em
+um único trace. Isso valida o caminho síncrono e a propagação SQS para aquela
+execução; cada nova tentativa gera uma nova verificação independente.
 
-Se o trace aparecer, o New Relic o recebeu. O serviço de avaliação mantém em
-cache os dados da flag; por isso, requisições posteriores talvez não incluam
-spans de flag/targeting/auth. Aguarde o TTL do cache ou use outra flag
-existente para exercitar essas relações.
+Se o script retornar HTTP 502, confirme que `SERVICE_API_KEY` em
+`services/.env` corresponde a uma chave ativa do `auth-service`, atualize-a
+conforme a etapa 4 e recrie os três serviços. Se o trace mostrar os serviços
+síncronos, mas não `analytics-service`, confirme que as credenciais AWS não
+expiraram e que `AWS_SQS_URL` aponta para uma fila acessível.
+
+O script aguarda até 120 segundos por padrão; use `TRACE_WAIT_SECONDS` para
+ajustar esse limite e `TRACE_POLL_INTERVAL_SECONDS` para alterar a frequência
+das consultas. Para outra região, configure `NEW_RELIC_OTLP_ENDPOINT` para o
+Collector e `NEW_RELIC_GRAPHQL_URL` para o NerdGraph regional.
 
 ## Inspecione o estado de runtime
 
@@ -170,14 +188,13 @@ e targeting com auth. Os spans de banco de dados e Redis só devem ser
 considerados presentes se aparecerem na telemetria recebida.
 
 Collector pronto e configuração válida não comprovam que o New Relic recebeu
-telemetria. A propagação de contexto pelo SQS está configurada e coberta por
-testes unitários focados, mas a relação entre evaluation e analytics ainda não
-foi verificada de ponta a ponta. Para confirmá-la, o produtor precisa enviar a
-mensagem, o worker precisa consumi-la e os spans relacionados precisam
-aparecer no New Relic. Confirme que as credenciais AWS são válidas e que
-`AWS_SQS_URL` aponta para uma fila funcional; credenciais expiradas impedem
-essa verificação. Considere qualquer sinal ou relação validado somente depois
-de observá-lo no New Relic.
+telemetria. A propagação de contexto pelo SQS está configurada, coberta por
+testes unitários focados e foi verificada no New Relic em 2026-10-09: uma
+execução mostrou os cinco serviços no mesmo trace. Isso confirma aquela
+execução, não garante que analytics apareça em todos os traces futuros. A
+entrega e o consumo do evento dependem de credenciais AWS válidas e de
+`AWS_SQS_URL` apontar para uma fila funcional. Considere cada nova execução
+validada somente após observar os serviços relacionados no New Relic.
 
 ## Pare o conjunto de serviços
 
@@ -193,5 +210,5 @@ bancos de dados e do DynamoDB.
 Ao terminar, remova a chave do shell atual:
 
 ```sh
-unset NEW_RELIC_LICENSE_KEY
+unset NEW_RELIC_LICENSE_KEY NEW_RELIC_OTLP_ENDPOINT DEPLOYMENT_ENVIRONMENT
 ```

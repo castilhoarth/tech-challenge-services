@@ -531,7 +531,8 @@ Para executar o stack localmente, defina a chave no ambiente do terminal e
 inicie o Compose:
 
 ```sh
-read -r -s -p "New Relic license key: " NEW_RELIC_LICENSE_KEY
+printf 'New Relic ingest license key: '
+read -s NEW_RELIC_LICENSE_KEY
 printf '\n'
 export NEW_RELIC_LICENSE_KEY
 export DEPLOYMENT_ENVIRONMENT="development"
@@ -575,12 +576,16 @@ evaluation-service com flag-service e targeting-service, e essas chamadas com
 auth-service. Redis e PostgreSQL aparecem como dependências somente quando as
 operações instrumentadas geram spans. A mensagem SQS carrega o contexto W3C
 em atributos, que o analytics-service extrai para criar um span consumidor e
-relacionar o processamento ao trace de avaliação. Essa correlação depende de
-a mensagem ser consumida com sucesso e ainda precisa ser confirmada em um trace
-real do New Relic; credenciais SQS inválidas ou expiradas impedem essa
-verificação.
+relacionar o processamento ao trace de avaliação. Em 2026-10-09, a verificação
+no New Relic encontrou os cinco microsserviços em um mesmo trace. A presença
+de analytics-service em execuções futuras depende da entrega e do consumo
+bem-sucedidos da mensagem SQS; credenciais inválidas ou expiradas impedem essa
+relação.
 
 Para iniciar, gerar tráfego e verificar traces recebidos no New Relic, consulte
 [`docs/runbooks/observability.md`](./docs/runbooks/observability.md).
-O runbook também documenta os limites de verificação: Compose e saúde do
-Collector, sozinhos, não provam ingestão no New Relic.
+O runbook contém o passo a passo para preparar as chaves, iniciar o stack e
+executar `scripts/observability/test-distributed-traces.sh`, que confirma os
+serviços observados em um mesmo trace via NerdGraph. A execução validada em
+2026-10-09 encontrou os cinco microsserviços no mesmo trace. Compose e saúde
+do Collector, sozinhos, não provam ingestão no New Relic.
