@@ -4,15 +4,15 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'services/targeting-service-main/**'
+      - 'services/targeting-service/**'
       - 'k8s/**'
-      - 'docker-compose.yml'
+      - 'deploy/**'
       - '.github/workflows/**'
   pull_request:
     paths:
-      - 'services/targeting-service-main/**'
+      - 'services/targeting-service/**'
       - 'k8s/**'
-      - 'docker-compose.yml'
+      - 'deploy/**'
       - '.github/workflows/**'
 
 jobs:
@@ -20,7 +20,7 @@ jobs:
     uses: ./.github/workflows/reusable-ci.yml
     with:
       service: 'targeting'
-      context: 'services/targeting-service-main'
+      context: 'services/targeting-service'
       dockerfile: 'Dockerfile'
       image_name: 'targeting-service'
       language: 'python'

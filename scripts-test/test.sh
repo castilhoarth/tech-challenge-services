@@ -297,27 +297,27 @@ do
   echo -e "\n"
 done
 
-echo ""
-echo ""
+##echo ""
+##echo ""
 
-echo "========================================"
-echo "11. Deletando Flag"
-echo "========================================"
+##echo "========================================"
+##echo "11. Deletando Flag"
+##echo "========================================"
 
-echo "FLAG_NAME=$FLAG_NAME"
+##echo "FLAG_NAME=$FLAG_NAME"
 
-HTTP_CODE=$(curl -s -o response.json -w "%{http_code}" \
--X DELETE \
-"$BASE_URL_FLAG/flags/$FLAG_NAME" \
--H "Authorization: Bearer $API_KEY")
+##HTTP_CODE=$(curl -s -o response.json -w "%{http_code}" \
+##-X DELETE \
+##"$BASE_URL_FLAG/flags/$FLAG_NAME" \
+##-H "Authorization: Bearer $API_KEY")
 
-if [ "$HTTP_CODE" != "204" ]; then
-    echo "ERRO ao deletar flag (HTTP $HTTP_CODE)"
-    cat response.json
-    exit 1
-fi
+##if [ "$HTTP_CODE" != "204" ]; then
+##   echo "ERRO ao deletar flag (HTTP $HTTP_CODE)"
+##    cat response.json
+##    exit 1
+##fi
 
-echo "Flag removida com sucesso."
+## echo "Flag removida com sucesso." 
 
 echo ""
 echo ""

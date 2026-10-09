@@ -38,7 +38,7 @@ telemetry to New Relic.
 ```sh
 docker run --rm \
   --entrypoint /otelcol-contrib \
-  -v "$PWD/services/otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro" \
+  -v "$PWD/deploy/observability/otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro" \
   -e NEW_RELIC_LICENSE_KEY=validation-only \
   -e NEW_RELIC_OTLP_ENDPOINT=https://otlp.nr-data.net \
   otel/opentelemetry-collector-contrib:0.162.0 \
@@ -51,7 +51,7 @@ Check merged Compose syntax without displaying the resolved configuration:
 NEW_RELIC_LICENSE_KEY=validation-only \
 NEW_RELIC_OTLP_ENDPOINT=https://otlp.nr-data.net \
 DEPLOYMENT_ENVIRONMENT=validation \
-docker compose --env-file services/.env -f services/docker-compose.yml config --quiet
+docker compose --env-file services/.env -f deploy/local/docker-compose.yml config --quiet
 ```
 
 ## Start the stack
@@ -59,13 +59,13 @@ docker compose --env-file services/.env -f services/docker-compose.yml config --
 Build and start all services:
 
 ```sh
-docker compose --env-file services/.env -f services/docker-compose.yml up --build -d
+docker compose --env-file services/.env -f deploy/local/docker-compose.yml up --build -d
 ```
 
 Check container status and Collector health:
 
 ```sh
-docker compose --env-file services/.env -f services/docker-compose.yml ps
+docker compose --env-file services/.env -f deploy/local/docker-compose.yml ps
 curl -fsS http://localhost:13133/
 ```
 
@@ -93,14 +93,55 @@ miss, `evaluation-service` calls `flag-service` and `targeting-service`;
 those services validate API keys through `auth-service`. If SQS is configured
 and usable, evaluation events may also be processed by `analytics-service`.
 
+To generate multiple requests with unique trace IDs, run:
+
+```sh
+scripts/observability/generate-otel-traffic.sh
+```
+
+By default it sends 10 requests for `enable-new-dashboard`, waiting one second
+between requests. Ensure that flag exists in your local data. Override the
+behavior with environment variables:
+
+```sh
+FLAG_NAME='your-existing-flag' \
+TRAFFIC_COUNT=25 \
+REQUEST_INTERVAL_SECONDS=0.5 \
+scripts/observability/generate-otel-traffic.sh
+```
+
+The script prints each W3C trace ID so you can search for the exact request in
+New Relic. It does not require a New Relic query API key and does not confirm
+ingestion by itself.
+
+In New Relic's query interface, search for one of the printed IDs:
+
+```sql
+SELECT count(*) FROM Span
+WHERE trace.id = 'paste-printed-trace-id-here'
+SINCE 30 minutes ago
+```
+
+To see the services observed in that trace:
+
+```sql
+SELECT uniques(service.name) FROM Span
+WHERE trace.id = 'paste-printed-trace-id-here'
+SINCE 30 minutes ago
+```
+
+If the trace appears, New Relic received it. Evaluation caches flag data by
+flag name, so later requests may not include flag/targeting/auth spans; wait
+for the cache TTL or use another existing flag to exercise those edges.
+
 ## Inspect runtime status
 
 Use Compose status and Collector logs to diagnose startup or export issues.
 Avoid printing environment variables or resolved Compose configuration.
 
 ```sh
-docker compose --env-file services/.env -f services/docker-compose.yml ps
-docker compose --env-file services/.env -f services/docker-compose.yml logs --tail=100 otel-collector
+docker compose --env-file services/.env -f deploy/local/docker-compose.yml ps
+docker compose --env-file services/.env -f deploy/local/docker-compose.yml logs --tail=100 otel-collector
 ```
 
 ## Verify telemetry in New Relic
@@ -130,7 +171,7 @@ after observing it in New Relic.
 Stop services without deleting persistent data:
 
 ```sh
-docker compose --env-file services/.env -f services/docker-compose.yml down
+docker compose --env-file services/.env -f deploy/local/docker-compose.yml down
 ```
 
 Do not use `docker compose down -v`; the existing database and DynamoDB data

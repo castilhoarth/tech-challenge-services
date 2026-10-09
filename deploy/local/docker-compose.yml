@@ -16,7 +16,7 @@ services:
     ports:
       - "127.0.0.1:13133:13133"
     volumes:
-      - ./otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro
+      - ../observability/otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro
     environment:
       NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY:?Set NEW_RELIC_LICENSE_KEY in the environment}
       NEW_RELIC_OTLP_ENDPOINT: ${NEW_RELIC_OTLP_ENDPOINT:-https://otlp.nr-data.net}
@@ -34,10 +34,10 @@ services:
       retries: 10
     volumes:
       - auth_data:/var/lib/postgresql/data
-      - ./auth-service-main/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ../../services/auth-service/db/init.sql:/docker-entrypoint-initdb.d/init.sql
 
   auth-service:
-    build: ./auth-service-main
+    build: ../../services/auth-service
     ports:
       - "${AUTH_PORT}:${AUTH_PORT}"
     environment:
@@ -65,10 +65,10 @@ services:
       retries: 10
     volumes:
       - flags_data:/var/lib/postgresql/data
-      - ./flag-service-main/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ../../services/flag-service/db/init.sql:/docker-entrypoint-initdb.d/init.sql
       
   flag-service:
-    build: ./flag-service-main
+    build: ../../services/flag-service
     ports:
       - "${FLAG_PORT}:${FLAG_PORT}"
     environment:
@@ -99,10 +99,10 @@ services:
       retries: 10
     volumes:
       - targeting_data:/var/lib/postgresql/data
-      - ./targeting-service-main/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ../../services/targeting-service/db/init.sql:/docker-entrypoint-initdb.d/init.sql
 
   targeting-service:
-    build: ./targeting-service-main
+    build: ../../services/targeting-service
     ports:
       - "${TARGETING_PORT}:${TARGETING_PORT}"
     environment:
@@ -122,8 +122,6 @@ services:
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -131,7 +129,7 @@ services:
       retries: 5
 
   evaluation-service:
-    build: ./evaluation-service-main
+    build: ../../services/evaluation-service
     ports:
       - "${EVALUATION_PORT}:${EVALUATION_PORT}"
     environment:
@@ -159,7 +157,6 @@ services:
 
   dynamodb:
     image: amazon/dynamodb-local:latest
-    container_name: dynamodb-local
     command: "-jar DynamoDBLocal.jar -sharedDb -dbPath /data"
     ports:
       - "8000:8000"
@@ -168,7 +165,7 @@ services:
     user: "root"
 
   dynamodb-init:
-    build: ./analytics-service-main
+    build: ../../services/analytics-service
     command: ["python", "init_dynamodb.py"]
     environment:
       AWS_DYNAMODB_ENDPOINT: http://dynamodb:8000
@@ -182,7 +179,7 @@ services:
     restart: "no"
 
   analytics-service:
-    build: ./analytics-service-main
+    build: ../../services/analytics-service
     ports:
       - "8005:8005"
     environment:

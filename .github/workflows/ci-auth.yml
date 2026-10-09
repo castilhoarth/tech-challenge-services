@@ -4,15 +4,15 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'services/auth-service-main/**'
+      - 'services/auth-service/**'
       - 'k8s/**'
-      - 'docker-compose.yml'
+      - 'deploy/**'
       - '.github/workflows/**'
   pull_request:
     paths:
-      - 'services/auth-service-main/**'
+      - 'services/auth-service/**'
       - 'k8s/**'
-      - 'docker-compose.yml'
+      - 'deploy/**'
       - '.github/workflows/**'
 
 jobs:
@@ -20,7 +20,7 @@ jobs:
     uses: ./.github/workflows/reusable-ci.yml
     with:
       service: 'auth'
-      context: 'services/auth-service-main'
+      context: 'services/auth-service'
       dockerfile: 'Dockerfile'
       image_name: 'auth-service'
       language: 'go'
