@@ -46,8 +46,10 @@ tech-challenge-services/
 ├── deploy/
 │   ├── local/docker-compose.yml
 │   └── observability/otel-collector/config.yaml
-├── docs/runbooks/
-│   └── observability.md
+├── docs/
+│   ├── documentação-observabilidade.md
+│   └── runbooks/
+│       └── observability.md
 ├── scripts/observability/
 ├── .github/workflows/
 │   ├── ci-<service>.yml
@@ -588,4 +590,7 @@ O runbook contém o passo a passo para preparar as chaves, iniciar o stack e
 executar `scripts/observability/test-distributed-traces.sh`, que confirma os
 serviços observados em um mesmo trace via NerdGraph. A execução validada em
 2026-10-09 encontrou os cinco microsserviços no mesmo trace. Compose e saúde
-do Collector, sozinhos, não provam ingestão no New Relic.
+do Collector, sozinhos, não provam ingestão no New Relic. Para detalhes sobre
+instrumentação, propagação W3C, o fluxo SQS e a diferença entre Distributed
+Trace e Service Map, consulte
+[`docs/documentação-observabilidade.md`](./docs/documentação-observabilidade.md).
