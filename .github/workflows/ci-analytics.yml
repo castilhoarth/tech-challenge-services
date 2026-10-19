@@ -4,15 +4,15 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'services/analytics-service-main/**'
+      - 'services/analytics-service/**'
       - 'k8s/**'
-      - 'docker-compose.yml'
+      - 'deploy/**'
       - '.github/workflows/**'
   pull_request:
     paths:
-      - 'services/analytics-service-main/**'
+      - 'services/analytics-service/**'
       - 'k8s/**'
-      - 'docker-compose.yml'
+      - 'deploy/**'
       - '.github/workflows/**'
 
 jobs:
@@ -20,7 +20,7 @@ jobs:
     uses: ./.github/workflows/reusable-ci.yml
     with:
       service: 'analytics'
-      context: 'services/analytics-service-main'
+      context: 'services/analytics-service'
       dockerfile: 'Dockerfile'
       image_name: 'analytics-service'
       language: 'python'

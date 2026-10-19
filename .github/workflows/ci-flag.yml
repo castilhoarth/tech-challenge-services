@@ -4,15 +4,15 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'services/flag-service-main/**'
+      - 'services/flag-service/**'
       - 'k8s/**'
-      - 'docker-compose.yml'
+      - 'deploy/**'
       - '.github/workflows/**'
   pull_request:
     paths:
-      - 'services/flag-service-main/**'
+      - 'services/flag-service/**'
       - 'k8s/**'
-      - 'docker-compose.yml'
+      - 'deploy/**'
       - '.github/workflows/**'
 
 jobs:
@@ -20,7 +20,7 @@ jobs:
     uses: ./.github/workflows/reusable-ci.yml
     with:
       service: 'flag'
-      context: 'services/flag-service-main'
+      context: 'services/flag-service'
       dockerfile: 'Dockerfile'
       image_name: 'flag-service'
       language: 'python'

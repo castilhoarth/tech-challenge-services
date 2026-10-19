@@ -4,15 +4,15 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'services/evaluation-service-main/**'
+      - 'services/evaluation-service/**'
       - 'k8s/**'
-      - 'docker-compose.yml'
+      - 'deploy/**'
       - '.github/workflows/**'
   pull_request:
     paths:
-      - 'services/evaluation-service-main/**'
+      - 'services/evaluation-service/**'
       - 'k8s/**'
-      - 'docker-compose.yml'
+      - 'deploy/**'
       - '.github/workflows/**'
 
 jobs:
@@ -20,7 +20,7 @@ jobs:
     uses: ./.github/workflows/reusable-ci.yml
     with:
       service: 'evaluation'
-      context: 'services/evaluation-service-main'
+      context: 'services/evaluation-service'
       dockerfile: 'Dockerfile'
       image_name: 'evaluation-service'
       language: 'go'

@@ -9,6 +9,7 @@
 
 - [Microsserviços](#microsserviços)
 - [Estrutura do repositório](#estrutura-do-repositório)
+- [Execução local](#execução-local)
 - [Infraestrutura e deployment](#infraestrutura-e-deployment)
 - [Decisões de arquitetura](#decisões-de-arquitetura)
 - [CI / GitHub Actions](#ci--github-actions)
@@ -26,22 +27,30 @@ mas possuem código, testes e imagens Docker independentes.
 
 | Serviço | Linguagem | Caminho | Dockerfile | Testes |
 | --- | --- | --- | :---: | :---: |
-| Auth | Go | `services/auth-service-main` | Sim | Sim |
-| Flag | Python | `services/flag-service-main` | Sim | Sim |
-| Targeting | Go | `services/targeting-service-main` | Sim | Sim |
-| Evaluation | Go | `services/evaluation-service-main` | Sim | Sim |
-| Analytics | Python | `services/analytics-service-main` | Sim | Sim |
+| Auth | Go | `services/auth-service` | Sim | Sim |
+| Flag | Python | `services/flag-service` | Sim | Sim |
+| Targeting | Python | `services/targeting-service` | Sim | Sim |
+| Evaluation | Go | `services/evaluation-service` | Sim | Sim |
+| Analytics | Python | `services/analytics-service` | Sim | Sim |
 
 ## Estrutura do repositório
 
 ```text
-tech-challenge-3/
+tech-challenge-services/
 ├── services/
-│   ├── auth-service-main/
-│   ├── flag-service-main/
-│   ├── targeting-service-main/
-│   ├── evaluation-service-main/
-│   └── analytics-service-main/
+│   ├── auth-service/
+│   ├── flag-service/
+│   ├── targeting-service/
+│   ├── evaluation-service/
+│   └── analytics-service/
+├── deploy/
+│   ├── local/docker-compose.yml
+│   └── observability/otel-collector/config.yaml
+├── docs/
+│   ├── documentação-observabilidade.md
+│   └── runbooks/
+│       └── observability.md
+├── scripts/observability/
 ├── .github/workflows/
 │   ├── ci-<service>.yml
 │   └── reusable-ci.yml
@@ -49,7 +58,32 @@ tech-challenge-3/
 ```
 
 - **Modelo:** monorepo, com CI e serviços no mesmo repositório.
-- **Repositório raiz:** `tech-challenge-3`.
+- **Repositório raiz:** `tech-challenge-services`.
+- Cada serviço mantém código, testes, dependências e Dockerfile juntos.
+- Compose e configuração compartilhada do Collector ficam em `deploy/`;
+  runbooks ficam em `docs/runbooks/`.
+
+## Execução local
+
+Com Docker Compose instalado e as variáveis locais configuradas em
+`services/.env`, inicie o stack a partir da raiz do repositório:
+
+```sh
+docker compose --env-file services/.env -f deploy/local/docker-compose.yml up --build -d
+```
+
+O Collector também exige `NEW_RELIC_LICENSE_KEY` no ambiente do terminal.
+Consulte [Observabilidade dos microsserviços](#observabilidade-dos-microsserviços)
+para configurá-la com segurança.
+
+Para parar os containers sem remover os volumes de dados:
+
+```sh
+docker compose --env-file services/.env -f deploy/local/docker-compose.yml down
+```
+
+Não acrescente `-v` ao comando `down`, pois isso removeria os volumes
+persistentes.
 
 ## Infraestrutura e deployment
 
@@ -104,12 +138,12 @@ A tag `latest` pode ser mantida apenas para builds da branch principal.
 O pipeline deve executar somente quando houver alterações relevantes no serviço
 ou em arquivos compartilhados, como:
 
-- `services/auth-service-main/**`
-- `services/flag-service-main/**`
-- `services/evaluation-service-main/**`
-- `services/targeting-service-main/**`
-- `services/analytics-service-main/**`
-- `docker-compose.yml`
+- `services/auth-service/**`
+- `services/flag-service/**`
+- `services/evaluation-service/**`
+- `services/targeting-service/**`
+- `services/analytics-service/**`
+- `deploy/**`
 - `.github/workflows/**`
 
 ### Ordem dos jobs
@@ -234,7 +268,7 @@ flowchart TD
 ## Documentação do pipeline
 
 A implementação de CI/CD está centralizada em
-[`tech-challenge-3/.github/workflows/reusable-ci.yml`](./tech-challenge-3/.github/workflows/reusable-ci.yml).
+`.github/workflows/reusable-ci.yml`.
 Cada serviço possui um workflow chamador (`ci-auth.yml`, `ci-analytics.yml`,
 `ci-evaluation.yml`, `ci-flag.yml` ou `ci-targeting.yml`) que fornece os valores
 específicos do serviço. Assim, a lógica de build e segurança não é duplicada
@@ -317,7 +351,7 @@ jobs:
     uses: ./.github/workflows/reusable-ci.yml
     with:
       service: 'analytics'
-      context: 'services/analytics-service-main'
+      context: 'services/analytics-service'
       dockerfile: 'Dockerfile'
       image_name: 'analytics-service'
       language: 'python'
@@ -360,7 +394,7 @@ Antes de habilitar essa etapa em produção, verifique se:
 
 O repositório contém um cenário de teste de falha intencionalmente desabilitado
 em
-[`services/analytics-service-main/test_app.py`](./tech-challenge-3/services/analytics-service-main/test_app.py).
+[`services/analytics-service/test_app.py`](./services/analytics-service/test_app.py).
 O teste fica comentado por padrão:
 
 ```python
@@ -486,3 +520,77 @@ flowchart LR
     class AppRepo,CI inScope;
     class ECR,GitOps,Argo,Cluster,IaC external;
 ```
+
+## Observabilidade dos microsserviços
+
+Os cinco microsserviços enviam traces, métricas e logs suportados por OTLP/HTTP
+protobuf para o OpenTelemetry Collector (`otel-collector:4318`). O Collector
+centraliza a exportação para New Relic. A chave de ingestão é fornecida somente
+ao container do Collector em runtime; não a grave em arquivos versionados,
+imagens Docker ou variáveis dos microsserviços.
+
+Para executar o stack localmente, defina a chave no ambiente do terminal e
+inicie o Compose:
+
+```sh
+printf 'New Relic ingest license key: '
+read -s NEW_RELIC_LICENSE_KEY
+printf '\n'
+export NEW_RELIC_LICENSE_KEY
+export DEPLOYMENT_ENVIRONMENT="development"
+docker compose --env-file services/.env -f deploy/local/docker-compose.yml up --build -d
+```
+
+O endpoint padrão do exportador do Collector é
+`https://otlp.nr-data.net`. Para uma conta em outra região, configure
+`NEW_RELIC_OTLP_ENDPOINT` com o endpoint OTLP/HTTP regional da conta antes de
+iniciar o Compose. A configuração do Collector está em
+[`deploy/observability/otel-collector/config.yaml`](./deploy/observability/otel-collector/config.yaml).
+
+### Serviços Python
+
+`analytics-service`, `flag-service` e `targeting-service` iniciam com
+auto-instrumentação OpenTelemetry. Os instrumentors existentes capturam as
+requisições Flask e as chamadas suportadas dos clientes (como `requests`,
+psycopg2 e Botocore, de acordo com cada serviço). A instrumentação de logging
+Python também exporta registros de aplicação por meio do Collector. Os nomes
+de serviço são definidos como `analytics-service`, `flag-service` e
+`targeting-service`.
+
+### Serviços Go
+
+`auth-service` e `evaluation-service` inicializam os OpenTelemetry SDKs
+diretamente no código Go. Ambos exportam traces, métricas e logs OTLP para o
+Collector e usam identidades distintas: `auth-service` e
+`evaluation-service`. O handler HTTP cria spans de servidor; o cliente HTTP do
+serviço de avaliação propaga W3C Trace Context para chamadas ao flag-service
+e targeting-service. A conexão PostgreSQL de auth usa instrumentação
+`database/sql`, e o cliente Redis do evaluation usa o hook compatível com
+go-redis v8. Os logs Go continuam no stderr e também são enviados ao Collector.
+Para eventos de avaliação, o produtor cria um span de envio SQS e propaga
+`traceparent`/`tracestate` em atributos da mensagem.
+
+### Propagação e limites
+
+O ambiente `DEPLOYMENT_ENVIRONMENT` identifica o ambiente em todas as
+aplicações. Com tráfego real, traces síncronos podem relacionar
+evaluation-service com flag-service e targeting-service, e essas chamadas com
+auth-service. Redis e PostgreSQL aparecem como dependências somente quando as
+operações instrumentadas geram spans. A mensagem SQS carrega o contexto W3C
+em atributos, que o analytics-service extrai para criar um span consumidor e
+relacionar o processamento ao trace de avaliação. Em 2026-10-09, a verificação
+no New Relic encontrou os cinco microsserviços em um mesmo trace. A presença
+de analytics-service em execuções futuras depende da entrega e do consumo
+bem-sucedidos da mensagem SQS; credenciais inválidas ou expiradas impedem essa
+relação.
+
+Para iniciar, gerar tráfego e verificar traces recebidos no New Relic, consulte
+[`docs/runbooks/observability.md`](./docs/runbooks/observability.md).
+O runbook contém o passo a passo para preparar as chaves, iniciar o stack e
+executar `scripts/observability/test-distributed-traces.sh`, que confirma os
+serviços observados em um mesmo trace via NerdGraph. A execução validada em
+2026-10-09 encontrou os cinco microsserviços no mesmo trace. Compose e saúde
+do Collector, sozinhos, não provam ingestão no New Relic. Para detalhes sobre
+instrumentação, propagação W3C, o fluxo SQS e a diferença entre Distributed
+Trace e Service Map, consulte
+[`docs/documentação-observabilidade.md`](./docs/documentação-observabilidade.md).
