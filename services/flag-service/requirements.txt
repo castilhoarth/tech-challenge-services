@@ -10,3 +10,4 @@ opentelemetry-instrumentation-flask
 opentelemetry-instrumentation-logging
 opentelemetry-instrumentation-requests
 opentelemetry-instrumentation-psycopg2
+prometheus-client==0.21.1

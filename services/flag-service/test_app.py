@@ -8,7 +8,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from app import app
+from app import app, SIMULATED_ERRORS
 
 
 @pytest.fixture
@@ -45,6 +45,51 @@ class TestHealthEndpoint:
         assert response.status_code == 200
         data = json.loads(response.data)
         assert data['status'] == 'ok'
+
+    def test_metrics_exposes_simulated_error_counter(self, client):
+        response = client.get('/metrics')
+
+        assert response.status_code == 200
+        assert 'flag_service_simulated_errors_total' in response.get_data(as_text=True)
+
+
+class TestErrorSimulator:
+    """Tests for the deliberate error simulator"""
+
+    def test_simulator_requires_authorization(self, client, mock_requests):
+        response = client.post('/__test__/error')
+
+        assert response.status_code == 401
+        mock_requests.get.assert_not_called()
+
+    def test_simulator_returns_one_server_error(self, client, mock_requests, caplog):
+        mock_requests.get.return_value.status_code = 200
+        before = next(
+            sample.value
+            for family in SIMULATED_ERRORS.collect()
+            for sample in family.samples
+            if sample.name == 'flag_service_simulated_errors_total'
+        )
+
+        response = client.post(
+            '/__test__/error',
+            headers={'Authorization': 'test-api-key'}
+        )
+
+        after = next(
+            sample.value
+            for family in SIMULATED_ERRORS.collect()
+            for sample in family.samples
+            if sample.name == 'flag_service_simulated_errors_total'
+        )
+        assert response.status_code == 500
+        assert response.get_json() == {
+            'error': 'Simulated internal server error',
+            'simulated': True
+        }
+        assert after == before + 1
+        assert any('simulated_http_error' in record.message for record in caplog.records)
+        mock_requests.get.assert_called_once()
 
 
 class TestAuthMiddleware:

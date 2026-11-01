@@ -5,11 +5,12 @@ import requests
 from requests.exceptions import RequestException, Timeout
 from psycopg2.extras import RealDictCursor
 from psycopg2.pool import SimpleConnectionPool
-from flask import Flask, request, jsonify
+from flask import Flask, Response, request, jsonify
 from dotenv import load_dotenv
 from functools import wraps
 import logging
 import time
+from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Counter, generate_latest
 
 # Configura o logging
 logging.basicConfig(level=logging.INFO)
@@ -19,6 +20,13 @@ log = logging.getLogger(__name__)
 load_dotenv() 
 
 app = Flask(__name__)
+
+METRICS_REGISTRY = CollectorRegistry()
+SIMULATED_ERRORS = Counter(
+    "flag_service_simulated_errors",
+    "Total number of deliberately simulated HTTP 500 responses.",
+    registry=METRICS_REGISTRY
+)
 
 # Detecta ambiente de teste (GitHub Actions ou pytest)
 IS_TEST = os.getenv("ENVIRONMENT") == "test" or "PYTEST_CURRENT_TEST" in os.environ
@@ -84,6 +92,27 @@ def require_auth(f):
 @app.route('/health')
 def health():
     return jsonify({"status": "ok"})
+
+@app.route('/metrics')
+def metrics():
+    return Response(
+        generate_latest(METRICS_REGISTRY),
+        content_type=CONTENT_TYPE_LATEST
+    )
+
+@app.route('/__test__/error', methods=['POST'])
+@require_auth
+def simulate_error():
+    SIMULATED_ERRORS.inc()
+    log.error(
+        "simulated_http_error endpoint=%s simulated=true",
+        request.path,
+        extra={"event": "simulated_http_error", "simulated": True}
+    )
+    return jsonify({
+        "error": "Simulated internal server error",
+        "simulated": True
+    }), 500
 
 @app.route('/flags', methods=['POST'])
 @require_auth
