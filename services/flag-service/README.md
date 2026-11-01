@@ -104,3 +104,46 @@ curl -X PUT http://localhost:8002/flags/enable-new-dashboard \
 -d '{"is_enabled": false}'
 ```
 Saída esperada: (O JSON da flag atualizada, com `"is_enabled": false`).
+
+## Simulando erros 500
+
+O endpoint `POST /__test__/error` usa a mesma validação de API key que os
+endpoints de flags e retorna exatamente um HTTP 500 por requisição. Ele também
+incrementa a métrica Prometheus `flag_service_simulated_errors_total` e registra
+`simulated_http_error` nos logs. O endpoint não mantém um loop em execução.
+
+Para executar uma simulação limitada, defina a chave de API sem exibi-la e
+informe a URL e a duração desejada. O gerador envia a primeira requisição
+imediatamente e as próximas a cada cinco segundos. Execute o comando a partir
+da raiz do repositório `tech-challenge-services`:
+
+```bash
+read -s -p "Flag-service API key: " FLAG_SERVICE_API_KEY
+printf '\n'
+export FLAG_SERVICE_API_KEY
+FLAG_SERVICE_SIMULATOR_URL="http://localhost:8002/__test__/error" \
+ERROR_SIMULATION_DURATION_SECONDS=60 \
+scripts/observability/simulate-flag-service-errors.sh
+unset FLAG_SERVICE_API_KEY
+```
+
+Para executar pelo Ingress no AWS, use a URL pública do serviço com o prefixo
+`/flags`, por exemplo
+`https://<ingress-host>/flags/__test__/error`. O Ingress remove esse prefixo
+antes de encaminhar a requisição. Use uma duração positiva em segundos; o
+gerador encerra automaticamente ao fim do intervalo ou ao receber uma resposta
+inesperada. HTTP 500 é o resultado esperado.
+
+O Deployment marca os pods para scrape Prometheus em `/metrics` na porta 8002.
+O agente/scraper Prometheus do cluster precisa estar configurado para descobrir
+pods por essas annotations. No Grafana, use a expressão abaixo para alertar
+quando houver ao menos um erro simulado no último minuto:
+
+```promql
+sum(increase(flag_service_simulated_errors_total[1m])) > 0
+```
+
+Confirme também a presença dos logs `simulated_http_error` no Loki e inspecione
+os traces HTTP 500 no New Relic. O endpoint `/health` continua retornando 200
+durante a simulação, portanto os probes do Kubernetes não devem reiniciar o
+serviço.
